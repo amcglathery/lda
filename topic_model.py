@@ -12,13 +12,17 @@ class TopicModelLDA:
   word_to_id = {}
   id_to_word = []
 
+  # bijection from documents to document ids. document ids are used to index
+  # into the count matricies
+  id_to_doc = []
+  doc_to_id = {}
+
   # all of the following are numpy arrays
   topic_word_counts = None
   document_topic_counts = None
   topic_word_totals = None # sum of topic_word_counts over all words
   document_word_totals = None # sum of document_topic_counts over all documents
 
-  documents = [] # a list of strings of document names indexed by doc_id
   terms = []
   test_terms = []
 
@@ -36,41 +40,55 @@ class TopicModelLDA:
     matricies, and populates the requisate lexicon data structures and
     sum vectors
     """
+    doc_set = os.listdir(test_data) + os.listdir(training_data)
+
+    # the pickle has the document names in int format (no leading zeros)
+    # so the filenames must be converted
+    doc_set_strings = set([ str(int(d[:7])) for d in doc_set ])
+
+    self.id_to_doc = list(doc_set_strings)
+    self.doc_to_id = {doc : doc_id for (doc_id, doc) in enumerate(self.id_to_doc)}
+
     self.build_lexicon(training_data)
     self.build_lexicon(test_data)
+    self.init_count_matricies()
     self.load_training_data(training_data)
     self.load_test_data(test_data)
 
+  def init_count_matricies(self):
+    self.topic_word_counts = np.zeros((self.topics, len(self.id_to_word)), dtype=np.uint16)
+    self.document_topic_counts = np.zeros((len(self.id_to_doc), self.topics), dtype=np.uint16)
+    self.topic_word_totals = np.zeros(self.topics, dtype=np.uint32)
+    self.document_word_totals = np.zeros(len(self.id_to_doc), dtype=np.uint32)
+
   def load_training_data(self, files_dir):
     print "Populating Count Matricies"
-    self.topic_word_counts = np.zeros((self.topics, len(self.id_to_word)), dtype=np.uint16)
-    self.document_topic_counts = np.zeros((len(self.documents), self.topics), dtype=np.uint16)
-    self.topic_word_totals = np.zeros(self.topics, dtype=np.uint32)
-    self.document_word_totals = np.zeros(len(self.documents), dtype=np.uint32)
-    for doc_id, f in enumerate(os.listdir(files_dir)):
-      with open(files_dir + '/' + f, 'r') as doc:
+    for doc_name in os.listdir(files_dir):
+      with open(files_dir + '/' + doc_name, 'r') as doc:
         for word in re.split("\W|_", doc.read()):
           word = self.clean_word(word, None)
           if word:
-            word_id = self.word_to_id[word]
-            topic = random.randint(0, self.topics - 1)
-            term = (word_id, topic, doc_id)
+            term = self.build_term(word, self.doc_to_id[str(int(doc_name[:7]))])
             self.terms.append(term)
             self.add_term(term)
     print len(self.terms), " Terms"
 
   def load_test_data(self, files_dir):
     print "Building test terms"
-    for doc_id, f in enumerate(os.listdir(files_dir)):
-      with open(files_dir + '/' + f, 'r') as doc:
+    for doc_name in os.listdir(files_dir):
+      with open(files_dir + '/' + doc_name, 'r') as doc:
         for word in re.split("\W|_", doc.read()):
           word = self.clean_word(word, None)
           if word:
-            word_id = self.word_to_id[word]
-            topic = random.randint(0, self.topics - 1)
-            term = (word_id, topic, doc_id)
+            term = self.build_term(word, self.doc_to_id[str(int(doc_name[:7]))])
             self.test_terms.append(term)
     print len(self.test_terms), " Test Terms"
+
+  def build_term(self, word, doc_id):
+    word_id = self.word_to_id[word]
+    topic = random.randint(0, self.topics - 1)
+    term = (word_id, topic, doc_id)
+    return term
 
   def add_term(self, term):
     """
@@ -99,7 +117,6 @@ class TopicModelLDA:
     seen_words = set([""])
     print "Building Lexicon"
     for f in os.listdir(files_dir):
-      self.documents.append(f)
       with open(files_dir + '/' + f, 'r') as doc:
         for word in re.split("\W|_", doc.read()):
           word = self.clean_word(word, seen_words)
@@ -132,21 +149,24 @@ class TopicModelLDA:
         term = self.terms[t]
         self.remove_term(term)
 
-        probs = [ self.p_topic(term, topic) for topic in range(self.topics) ]
+        probs = self.get_probs(term)
 
         rand = random.random() * sum(probs)
-        topic_choice = -1
+        choice = -1
         while True:
-          topic_choice += 1
-          rand -= probs[topic_choice]
+          choice += 1
+          rand -= probs[choice]
           if rand <= 0:
             break
 
-        term = (term[0], topic_choice, term[2])
+        term = (term[0], choice, term[2])
         self.add_term(term)
         self.terms[t] = term
 
-  def p_topic(self, term, topic):
+  def get_probs(self, term):
+    return [ self.prob(term, topic) for topic in range(self.topics) ]
+
+  def prob(self, term, topic):
     """
     returns the probability that the given term belongs to the given topic
     """
@@ -176,7 +196,7 @@ class TopicModelLDA:
 
     ppx = 0.0
     for term in self.test_terms:
-      ppx += math.log(sum( tm.p_topic(term, k) for k in range(tm.topics) ) )
+      ppx += math.log(sum( tm.get_probs(term)))
     ppx = math.exp(-ppx / len(self.test_terms))
 
     return ppx
