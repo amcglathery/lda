@@ -57,8 +57,8 @@ class TopicModelLDA:
 
   def init_count_matricies(self):
     self.topic_word_counts = np.zeros((self.topics, len(self.id_to_word)), dtype=np.uint16)
-    self.document_topic_counts = np.zeros((len(self.id_to_doc), self.topics), dtype=np.uint16)
     self.topic_word_totals = np.zeros(self.topics, dtype=np.uint32)
+    self.document_topic_counts = np.zeros((len(self.id_to_doc), self.topics), dtype=np.uint16)
     self.document_word_totals = np.zeros(len(self.id_to_doc), dtype=np.uint32)
 
   def load_training_data(self, files_dir):
